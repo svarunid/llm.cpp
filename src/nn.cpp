@@ -64,7 +64,6 @@ void nn::AdamW::update(std::vector<nn::Tensor> parameters, int t) {
     for (size_t i = 0; i < parameters.size(); ++i) {
         nn::Tensor &param = parameters[i];
 
-#pragma omp parallel for
         for (size_t j = 0; j < param.size; ++j) {
             m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param.grad[j];
             v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param.grad[j] * param.grad[j]);
