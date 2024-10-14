@@ -44,5 +44,6 @@ class FeedForwardNN : public Module {
 
   private:
     Tensor w1, v, w2, b2;
+    std::vector<float> z1, h;
 };
 }; // namespace nn

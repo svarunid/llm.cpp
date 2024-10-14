@@ -44,10 +44,84 @@ nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t out
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
       v({input_dim, hidden_dim}, input_dim * hidden_dim),
       w2({hidden_dim, output_dim}, input_dim * hidden_dim),
-      b2({1, output_dim}, input_dim * hidden_dim) {}
+      b2({1, output_dim}, input_dim * hidden_dim), z1(hidden_dim, 0.0f), h(hidden_dim, 0.0f) {}
 
 vector<nn::Tensor> nn::FeedForwardNN::parameters() {
     return {w1, v, w2, b2};
+}
+
+std::vector<float> nn::FeedForwardNN::forward(std::vector<float> &x) {
+    if (x.size() == w1.shape[1])
+        throw std::invalid_argument("The size or shape of input doesn't match the parameters");
+    size_t hidden_dim = w1.shape[0];
+
+    for (size_t i = 0; i < hidden_dim; ++i) {
+        for (size_t j = 0; j < x.size(); ++j) {
+            z1[i] += w1.data[i * x.size() + j] * x[j];
+        }
+    }
+
+    for (size_t i = 0; i < hidden_dim; ++i) {
+        float swish = z1[i] / (1 + std::exp(-z1[i]));
+        float linear = 0.0f;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            linear += v.data[i * hidden_dim + j] * z1[j];
+        }
+        h[i] = swish * linear;
+    }
+
+    std::vector<float> y(w2.shape[0], 0.0f);
+    for (size_t i = 0; i < w2.shape[0]; ++i) {
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            y[i] += w2.data[i * hidden_dim + j] * h[j];
+        }
+        y[i] += b2.data[i];
+    }
+
+    return y;
+}
+
+std::vector<float> nn::FeedForwardNN::backward(std::vector<float> &x, std::vector<float> &dout) {
+    if (dout.size() == w2.shape[0])
+        throw std::invalid_argument("The size or shape of input doesn't match the parameters");
+    size_t hidden_dim = w1.shape[0];
+
+    std::vector<float> dh(hidden_dim, 0.0f);
+    for (size_t i = 0; i < w2.shape[0]; ++i) {
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            w2.grad[i * hidden_dim + j] += dout[i] * h[j];
+            dh[j] += dout[i] * w2.data[i * hidden_dim + j];
+        }
+        b2.grad[i] += dout[i];
+    }
+
+    std::vector<float> dz1(hidden_dim, 0.0f);
+    for (size_t i = 0; i < hidden_dim; ++i) {
+        float swish = z1[i] / (1 + std::exp(-z1[i]));
+        float sigmoid = 1 / (1 + std::exp(-z1[i]));
+        float linear = 0.0f;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            linear += v.data[i * hidden_dim + j] * z1[j];
+        }
+        float dswish = sigmoid * (1 + z1[i] * (1 - sigmoid));
+        dz1[i] = dh[i] * (linear * dswish);
+    }
+
+    for (size_t i = 0; i < hidden_dim; ++i) {
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            v.grad[i * hidden_dim + j] += dz1[i] * z1[j];
+        }
+    }
+
+    std::vector<float> dx(x.size(), 0.0f);
+    for (size_t i = 0; i < hidden_dim; ++i) {
+        for (size_t j = 0; j < x.size(); ++j) {
+            w1.grad[i * x.size() + j] += dz1[i] * x[j];
+            dx[j] += dz1[i] * w1.data[i * x.size() + j];
+        }
+    }
+
+    return dx;
 }
 
 nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
