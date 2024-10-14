@@ -1,14 +1,18 @@
 #include <stdexcept>
 #include <iostream>
+#include <random>
+#include <vector>
 
 #include <stddef.h>
 
 #include <nn.hpp>
 
 using namespace std;
-using namespace nn;
 
-Tensor::Tensor(vector<size_t> shape, size_t size) :
+std::default_random_engine nn::e;
+std::uniform_real_distribution<float> nn::dist(0.0f, 1.0f);
+
+nn::Tensor::Tensor(vector<size_t> shape, size_t size) :
     shape(shape), data(vector<float>(size)),
     grad(vector<float>(size, 0.0f)), size(size) {
     size_t calculatedSize = 1;
@@ -25,7 +29,7 @@ Tensor::Tensor(vector<size_t> shape, size_t size) :
     }
 };
 
-void Module::zero_grad() {
+void nn::Module::zero_grad() {
     for (auto& param : parameters()) {
         for (auto& el : param.grad) {
             el = 0.0f;
@@ -33,17 +37,17 @@ void Module::zero_grad() {
     }
 }
 
-vector<Tensor> Module::parameters() { return vector<Tensor>(); }
+vector<nn::Tensor> nn::Module::parameters() { return vector<nn::Tensor>(); }
 
-FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim) :
+nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim) :
     w1({ input_dim, hidden_dim }, input_dim* hidden_dim),
     v({ input_dim, hidden_dim }, input_dim* hidden_dim),
     w2({ hidden_dim, output_dim }, input_dim* hidden_dim),
     b2({ 1, output_dim }, input_dim* hidden_dim) {}
 
-vector<Tensor> FeedForwardNN::parameters() { return { w1, v, w2, b2 }; }
+vector<nn::Tensor> nn::FeedForwardNN::parameters() { return { w1, v, w2, b2 }; }
 
-AdamW::AdamW(
+nn::AdamW::AdamW(
     float lr, float beta_1,
     float beta_2, float eps,
     float weight_decay, std::vector<Tensor> parameters

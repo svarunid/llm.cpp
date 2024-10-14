@@ -1,4 +1,10 @@
-# add_executable(test_gpt2_model test_gpt2_model.cpp)
-# target_link_libraries(test_gpt2_model ${Arrow_LIBRARIES})
+include_directories(../include)
 
-# add_test(NAME TestGPT2Model COMMAND test_gpt2_model)
+find_package(GTest CONFIG REQUIRED)
+
+add_executable(nn_test nn_test.cpp ../src/nn.cpp)
+
+target_link_libraries(nn_test GTest::gtest GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(nn_test)

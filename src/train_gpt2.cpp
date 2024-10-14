@@ -1,7 +1,4 @@
-#include <iostream>
-#include <vector>
-#include <random>
-#include <algorithm>
+#include <nn.hpp>
 
 int main() {
     return 0;

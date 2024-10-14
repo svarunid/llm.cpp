@@ -1,11 +1,13 @@
+#pragma once
+
 #include <random>
 #include <vector>
 
 #include <stddef.h>
 
 namespace nn {
-    std::default_random_engine e;
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    extern std::default_random_engine e;
+    extern std::uniform_real_distribution<float> dist;
 
     struct Tensor {
         size_t size;
