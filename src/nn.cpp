@@ -52,19 +52,19 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
 };
 
 /*Get module parameters.*/
-std::vector<nn::Tensor> nn::Module::parameters() {
-    return std::vector<Tensor>();
+std::vector<nn::Tensor *> nn::Module::parameters() {
+    return std::vector<nn::Tensor *>();
 }
 
 /*Get module parameters along with activation*/
-std::vector<nn::Tensor> nn::Module::_parameters() {
-    return std::vector<Tensor>();
+std::vector<nn::Tensor *> nn::Module::_parameters() {
+    return std::vector<nn::Tensor *>();
 }
 
 /*Make tensor gradients zero.*/
 void nn::Module::zero_grad() {
     for (auto &param : _parameters()) {
-        for (auto &el : param.grad) {
+        for (auto &el : param->grad) {
             el = 0.0f;
         }
     }
@@ -74,18 +74,18 @@ void nn::Module::zero_grad() {
 nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
       v({input_dim, hidden_dim}, input_dim * hidden_dim),
-      w2({hidden_dim, output_dim}, input_dim * hidden_dim),
-      b2({1, output_dim}, input_dim * hidden_dim), z1({1, hidden_dim}, hidden_dim, 0.0f),
-      z2({1, hidden_dim}, hidden_dim, 0.0f), h({1, hidden_dim}, hidden_dim, 0.0f) {}
+      w2({hidden_dim, output_dim}, hidden_dim * output_dim), b2({1, output_dim}, output_dim),
+      z1({1, hidden_dim}, hidden_dim, 0.0f), z2({1, hidden_dim}, hidden_dim, 0.0f),
+      h({1, hidden_dim}, hidden_dim, 0.0f) {}
 
 /*Get parameters of FeedForwardNN.*/
-vector<nn::Tensor> nn::FeedForwardNN::parameters() {
-    return {w1, v, w2, b2};
+vector<nn::Tensor *> nn::FeedForwardNN::parameters() {
+    return {&w1, &v, &w2, &b2};
 }
 
 /*Get parameters of FeedForwardNN along with activation.*/
-vector<nn::Tensor> nn::FeedForwardNN::_parameters() {
-    return {w1, v, w2, b2, z1, z2, h};
+vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
+    return {&w1, &v, &w2, &b2, &z1, &z2, &h};
 }
 
 /*Calculate the forward of FeedForwardNN.*/
@@ -100,6 +100,7 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
         for (size_t j = 0; j < x.size; ++j) {
             z1.data[i] += w1.data[i * x.size + j] * x.data[j];
         }
+        // Swish(z1)
         z1.data[i] = z1.data[i] / (1 + std::exp(-z1.data[i]));
     }
 
@@ -113,7 +114,7 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
     }
 
     // h * w2 + b2
-    nn::Tensor y({1, output_dim}, output_dim);
+    nn::Tensor y({1, output_dim}, output_dim, 0.0f);
     for (size_t i = 0; i < output_dim; ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
             y.data[i] += w2.data[i * hidden_dim + j] * h.data[j];
@@ -163,27 +164,28 @@ nn::Tensor nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
 
 /*AdamW optimizer with weight decay.*/
 nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
-                 std::vector<nn::Tensor> parameters)
+                 std::vector<nn::Tensor *> parameters)
     : lr(lr), beta_1(beta_1), beta_2(beta_2), eps(eps), weight_decay(weight_decay) {
     for (auto &param : parameters) {
-        m.push_back(std::vector<float>(param.size, 0.0f));
-        v.push_back(std::vector<float>(param.size, 0.0f));
+        m.push_back(std::vector<float>(param->size, 0.0f));
+        v.push_back(std::vector<float>(param->size, 0.0f));
     }
 };
 
 /*Update parameters based on AdamW*/
-void nn::AdamW::update(std::vector<nn::Tensor> parameters, int t) {
+void nn::AdamW::update(std::vector<nn::Tensor *> parameters, int t) {
 #pragma omp parallel for
     for (size_t i = 0; i < parameters.size(); ++i) {
-        nn::Tensor &param = parameters[i];
-        for (size_t j = 0; j < param.size; ++j) {
-            m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param.grad[j];
-            v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param.grad[j] * param.grad[j]);
+        nn::Tensor *param = parameters[i];
+        for (size_t j = 0; j < param->size; ++j) {
+            m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param->grad[j];
+            v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param->grad[j] * param->grad[j]);
 
             float m_hat = m[i][j] / (1 - std::pow(beta_1, t));
             float v_hat = v[i][j] / (1 - std::pow(beta_2, t));
 
-            param.data[j] -= lr * (m_hat / (std::sqrt(v_hat) + eps) + weight_decay * param.data[j]);
+            param->data[j] -=
+                lr * (m_hat / (std::sqrt(v_hat) + eps) + weight_decay * param->data[j]);
         }
     }
 }

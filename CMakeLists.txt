@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 include_directories(include)
 
-add_executable(train_gpt2 src/train_gpt2.cpp)
+add_executable(train_gpt2 src/train_gpt2.cpp src/nn.cpp)
 find_package(Arrow CONFIG REQUIRED)
 target_link_libraries(train_gpt2 PRIVATE "$<IF:$<BOOL:${ARROW_BUILD_STATIC}>,Arrow::arrow_static,Arrow::arrow_shared>")
 

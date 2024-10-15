@@ -19,17 +19,17 @@ struct Tensor {
 };
 
 struct Module {
-    virtual std::vector<Tensor> parameters();
-    virtual std::vector<Tensor> _parameters();
+    virtual std::vector<Tensor *> parameters();
+    virtual std::vector<Tensor *> _parameters();
     void zero_grad();
 };
 
 class AdamW {
   public:
     AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
-          std::vector<Tensor> parameters);
+          std::vector<Tensor *> parameters);
 
-    void update(std::vector<Tensor> parameters, int t);
+    void update(std::vector<Tensor *> parameters, int t);
 
   private:
     float lr, beta_1, beta_2, eps, weight_decay;
@@ -40,8 +40,8 @@ class FeedForwardNN : public Module {
   public:
     FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
 
-    std::vector<Tensor> parameters() override;
-    std::vector<Tensor> _parameters() override;
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
 
     nn::Tensor operator()(Tensor &x);
     nn::Tensor backward(Tensor &x, Tensor &dout);
