@@ -2,7 +2,6 @@
 #include <cassert>
 #include <iostream>
 #include <nn.hpp>
-#include <omp.h>
 #include <random>
 #include <stddef.h>
 #include <stdexcept>
@@ -45,7 +44,7 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
             "The product of dimensions in shape does not match the provided size");
     }
 
-    for (size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; ++i) {
         data[i] = init;
         grad[i] = 0.0f;
     }
@@ -70,6 +69,37 @@ void nn::Module::zero_grad() {
     }
 }
 
+/*Initialize FeedForwardNN with given vocabulary size and model dimensions.*/
+nn::Embedding::Embedding(size_t vocab_size, size_t emb_dim)
+    : emb(nn::Tensor({vocab_size, emb_dim}, vocab_size * emb_dim)) {}
+
+/*Get parameters of Embedding.*/
+vector<nn::Tensor *> nn::Embedding::parameters() {
+    return {&emb};
+}
+
+/*Get parameters of Embedding along with activation.*/
+vector<nn::Tensor *> nn::Embedding::_parameters() {
+    return {&emb};
+}
+
+/*Calculate the forward of Embedding.*/
+nn::Tensor nn::Embedding::operator()(int token) {
+    Tensor out({emb.shape.back()}, emb.shape.back());
+    for (size_t i = 0; i < emb.shape.back(); ++i) {
+        out.data[i] = emb.data[i * token];
+    }
+
+    return out;
+}
+
+/*Backpropagation to find gradients of the embeddings.*/
+void nn::Embedding::backward(int token, Tensor &dout) {
+    for (size_t i = 0; i < emb.shape.back(); ++i) {
+        emb.grad[token * emb.shape.back() + i] += dout.grad[i];
+    }
+}
+
 /*Initialize FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
 nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
@@ -90,7 +120,7 @@ vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
 
 /*Calculate the forward of FeedForwardNN.*/
 nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
-    assert(x.shape == (std::vector<size_t>{1, w1.shape[0]}));
+    assert(x.shape == (std::vector<size_t>{w1.shape[0]}));
 
     size_t hidden_dim = w1.shape.back();
     size_t output_dim = w2.shape.back();
@@ -114,7 +144,7 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
     }
 
     // h * w2 + b2
-    nn::Tensor y({1, output_dim}, output_dim, 0.0f);
+    nn::Tensor y({output_dim}, output_dim, 0.0f);
     for (size_t i = 0; i < output_dim; ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
             y.data[i] += w2.data[i * hidden_dim + j] * h.data[j];
@@ -174,7 +204,6 @@ nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_d
 
 /*Update parameters based on AdamW*/
 void nn::AdamW::update(std::vector<nn::Tensor *> parameters, int t) {
-#pragma omp parallel for
     for (size_t i = 0; i < parameters.size(); ++i) {
         nn::Tensor *param = parameters[i];
         for (size_t j = 0; j < param->size; ++j) {

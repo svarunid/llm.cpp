@@ -36,6 +36,20 @@ class AdamW {
     std::vector<std::vector<float>> m, v;
 };
 
+class Embedding : public Module {
+  public:
+    Embedding(size_t vocab_size, size_t emb_dim);
+
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
+
+    Tensor operator()(int token);
+    void backward(int token, Tensor &dout);
+
+  private:
+    Tensor emb;
+};
+
 class FeedForwardNN : public Module {
   public:
     FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
@@ -43,8 +57,8 @@ class FeedForwardNN : public Module {
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
 
-    nn::Tensor operator()(Tensor &x);
-    nn::Tensor backward(Tensor &x, Tensor &dout);
+    Tensor operator()(Tensor &x);
+    Tensor backward(Tensor &x, Tensor &dout);
 
   private:
     Tensor w1, v, w2, b2; // Parameters
