@@ -20,6 +20,7 @@ struct Tensor {
 
 struct Module {
     virtual std::vector<Tensor> parameters();
+    virtual std::vector<Tensor> _parameters();
     void zero_grad();
 };
 
@@ -40,7 +41,9 @@ class FeedForwardNN : public Module {
     FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
 
     std::vector<Tensor> parameters() override;
-    nn::Tensor forward(Tensor &x);
+    std::vector<Tensor> _parameters() override;
+
+    nn::Tensor operator()(Tensor &x);
     nn::Tensor backward(Tensor &x, Tensor &dout);
 
   private:

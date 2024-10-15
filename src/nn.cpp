@@ -13,6 +13,7 @@ using namespace std;
 std::default_random_engine nn::e;
 std::uniform_real_distribution<float> nn::dist(0.0f, 1.0f);
 
+/*Tensor with the given shape and size and populate elements using uniform distribution*/
 nn::Tensor::Tensor(vector<size_t> shape, size_t size)
     : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
     size_t calculatedSize = 1;
@@ -31,6 +32,7 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size)
     }
 };
 
+/*Tensor with the given shape and size and intialize elements to `init`*/
 nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
     : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
     size_t calculatedSize = 1;
@@ -49,18 +51,26 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
     }
 };
 
+/*Get module parameters.*/
+std::vector<nn::Tensor> nn::Module::parameters() {
+    return std::vector<Tensor>();
+}
+
+/*Get module parameters along with activation*/
+std::vector<nn::Tensor> nn::Module::_parameters() {
+    return std::vector<Tensor>();
+}
+
+/*Make tensor gradients zero.*/
 void nn::Module::zero_grad() {
-    for (auto &param : parameters()) {
+    for (auto &param : _parameters()) {
         for (auto &el : param.grad) {
             el = 0.0f;
         }
     }
 }
 
-vector<nn::Tensor> nn::Module::parameters() {
-    return vector<nn::Tensor>();
-}
-
+/*Initialize FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
 nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
       v({input_dim, hidden_dim}, input_dim * hidden_dim),
@@ -68,13 +78,19 @@ nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t out
       b2({1, output_dim}, input_dim * hidden_dim), z1({1, hidden_dim}, hidden_dim, 0.0f),
       z2({1, hidden_dim}, hidden_dim, 0.0f), h({1, hidden_dim}, hidden_dim, 0.0f) {}
 
+/*Get parameters of FeedForwardNN.*/
 vector<nn::Tensor> nn::FeedForwardNN::parameters() {
+    return {w1, v, w2, b2};
+}
+
+/*Get parameters of FeedForwardNN along with activation.*/
+vector<nn::Tensor> nn::FeedForwardNN::_parameters() {
     return {w1, v, w2, b2, z1, z2, h};
 }
 
-nn::Tensor nn::FeedForwardNN::forward(nn::Tensor &x) {
-    std::vector<size_t> expected_shape = {1, w1.shape[0]};
-    assert(x.shape == expected_shape);
+/*Calculate the forward of FeedForwardNN.*/
+nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
+    assert(x.shape == (std::vector<size_t>{1, w1.shape[0]}));
 
     size_t hidden_dim = w1.shape.back();
     size_t output_dim = w2.shape.back();
@@ -87,7 +103,7 @@ nn::Tensor nn::FeedForwardNN::forward(nn::Tensor &x) {
         z1.data[i] = z1.data[i] / (1 + std::exp(-z1.data[i]));
     }
 
-    // Swish(z1) * Linear(x)
+    // Swish(z1) * (v * x)
     for (size_t i = 0; i < hidden_dim; ++i) {
         z2.data[i] = 0.0f;
         for (size_t j = 0; j < x.size; ++j) {
@@ -108,41 +124,44 @@ nn::Tensor nn::FeedForwardNN::forward(nn::Tensor &x) {
     return y;
 }
 
+/*Backpropagation of FeedForwardNN to find gradients of the parameters.*/
 nn::Tensor nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
     assert(dout.shape == b2.shape);
-
     size_t hidden_dim = w1.shape[0];
-    std::vector<float> dh(hidden_dim, 0.0f);
+
+    // Gradient of h, w2 & b2.
     for (size_t i = 0; i < w2.shape.back(); ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
             w2.grad[i * hidden_dim + j] += dout.grad[i] * h.data[j];
-            dh[j] += dout.grad[i] * w2.data[i * hidden_dim + j];
+            h.grad[j] += dout.grad[i] * w2.data[i * hidden_dim + j];
         }
         b2.grad[i] += dout.grad[i];
     }
 
-    std::vector<float> dz1(hidden_dim, 0.0f);
+    // Gradient of z1, z2 & v.
     for (size_t i = 0; i < hidden_dim; ++i) {
-        z2.grad[i] = dh[i] * z1.data[i];
+        z2.grad[i] = h.grad[i] * z1.data[i];
 
         for (size_t j = 0; j < x.size; ++j) {
-            v.grad[i * x.size + j] += z2.grad[i] * x.data[j]; // Gradient of v
+            v.grad[i * x.size + j] += z2.grad[i] * x.data[j];
         }
 
-        float dswish = dh[i] * z2.data[i], exp_z1 = std::exp(z1.data[i]);
-        dz1[i] = dswish * ((exp_z1 * (z1.data[i] + exp_z1 + 1)) / std::pow((exp_z1 + 1), 2));
+        float dswish = h.grad[i] * z2.data[i], exp_z1 = std::exp(z1.data[i]);
+        z1.grad[i] = dswish * ((exp_z1 * (z1.data[i] + exp_z1 + 1)) / std::pow((exp_z1 + 1), 2));
     }
 
+    // Gradient of w1 & x.
     for (size_t i = 0; i < hidden_dim; ++i) {
         for (size_t j = 0; j < x.size; ++j) {
-            w1.grad[i * x.size + j] += dz1[i] * x.data[j];
-            x.grad[j] += dz1[i] * w1.data[i * x.size + j];
+            w1.grad[i * x.size + j] += z1.grad[i] * x.data[j];
+            x.grad[j] += z1.grad[i] * w1.data[i * x.size + j];
         }
     }
 
     return x;
 }
 
+/*AdamW optimizer with weight decay.*/
 nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
                  std::vector<nn::Tensor> parameters)
     : lr(lr), beta_1(beta_1), beta_2(beta_2), eps(eps), weight_decay(weight_decay) {
@@ -152,6 +171,7 @@ nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_d
     }
 };
 
+/*Update parameters based on AdamW*/
 void nn::AdamW::update(std::vector<nn::Tensor> parameters, int t) {
 #pragma omp parallel for
     for (size_t i = 0; i < parameters.size(); ++i) {
