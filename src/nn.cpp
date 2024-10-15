@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <nn.hpp>
 #include <omp.h>
@@ -25,6 +27,25 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size)
 
     for (size_t i = 0; i < size; i++) {
         data[i] = dist(e);
+        grad[i] = 0.0f;
+    }
+};
+
+nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
+    : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
+    size_t calculatedSize = 1;
+    for (size_t dim : shape) {
+        calculatedSize *= dim;
+    }
+
+    if (calculatedSize != size) {
+        throw std::invalid_argument(
+            "The product of dimensions in shape does not match the provided size");
+    }
+
+    for (size_t i = 0; i < size; i++) {
+        data[i] = init;
+        grad[i] = 0.0f;
     }
 };
 
@@ -44,84 +65,82 @@ nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t out
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
       v({input_dim, hidden_dim}, input_dim * hidden_dim),
       w2({hidden_dim, output_dim}, input_dim * hidden_dim),
-      b2({1, output_dim}, input_dim * hidden_dim), z1(hidden_dim, 0.0f), h(hidden_dim, 0.0f) {}
+      b2({1, output_dim}, input_dim * hidden_dim), z1({1, hidden_dim}, hidden_dim, 0.0f),
+      z2({1, hidden_dim}, hidden_dim, 0.0f), h({1, hidden_dim}, hidden_dim, 0.0f) {}
 
 vector<nn::Tensor> nn::FeedForwardNN::parameters() {
-    return {w1, v, w2, b2};
+    return {w1, v, w2, b2, z1, z2, h};
 }
 
-std::vector<float> nn::FeedForwardNN::forward(std::vector<float> &x) {
-    if (x.size() == w1.shape[1])
-        throw std::invalid_argument("The size or shape of input doesn't match the parameters");
-    size_t hidden_dim = w1.shape[0];
+nn::Tensor nn::FeedForwardNN::forward(nn::Tensor &x) {
+    std::vector<size_t> expected_shape = {1, w1.shape[0]};
+    assert(x.shape == expected_shape);
 
+    size_t hidden_dim = w1.shape.back();
+    size_t output_dim = w2.shape.back();
+
+    // w1 * x
     for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < x.size(); ++j) {
-            z1[i] += w1.data[i * x.size() + j] * x[j];
+        for (size_t j = 0; j < x.size; ++j) {
+            z1.data[i] += w1.data[i * x.size + j] * x.data[j];
         }
+        z1.data[i] = z1.data[i] / (1 + std::exp(-z1.data[i]));
     }
 
+    // Swish(z1) * Linear(x)
     for (size_t i = 0; i < hidden_dim; ++i) {
-        float swish = z1[i] / (1 + std::exp(-z1[i]));
-        float linear = 0.0f;
-        for (size_t j = 0; j < hidden_dim; ++j) {
-            linear += v.data[i * hidden_dim + j] * z1[j];
+        z2.data[i] = 0.0f;
+        for (size_t j = 0; j < x.size; ++j) {
+            z2.data[i] += v.data[i * x.size + j] * x.data[j];
         }
-        h[i] = swish * linear;
+        h.data[i] = z1.data[i] * z2.data[i];
     }
 
-    std::vector<float> y(w2.shape[0], 0.0f);
-    for (size_t i = 0; i < w2.shape[0]; ++i) {
+    // h * w2 + b2
+    nn::Tensor y({1, output_dim}, output_dim);
+    for (size_t i = 0; i < output_dim; ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
-            y[i] += w2.data[i * hidden_dim + j] * h[j];
+            y.data[i] += w2.data[i * hidden_dim + j] * h.data[j];
         }
-        y[i] += b2.data[i];
+        y.data[i] += b2.data[i];
     }
 
     return y;
 }
 
-std::vector<float> nn::FeedForwardNN::backward(std::vector<float> &x, std::vector<float> &dout) {
-    if (dout.size() == w2.shape[0])
-        throw std::invalid_argument("The size or shape of input doesn't match the parameters");
-    size_t hidden_dim = w1.shape[0];
+nn::Tensor nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
+    assert(dout.shape == b2.shape);
 
+    size_t hidden_dim = w1.shape[0];
     std::vector<float> dh(hidden_dim, 0.0f);
-    for (size_t i = 0; i < w2.shape[0]; ++i) {
+    for (size_t i = 0; i < w2.shape.back(); ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
-            w2.grad[i * hidden_dim + j] += dout[i] * h[j];
-            dh[j] += dout[i] * w2.data[i * hidden_dim + j];
+            w2.grad[i * hidden_dim + j] += dout.grad[i] * h.data[j];
+            dh[j] += dout.grad[i] * w2.data[i * hidden_dim + j];
         }
-        b2.grad[i] += dout[i];
+        b2.grad[i] += dout.grad[i];
     }
 
     std::vector<float> dz1(hidden_dim, 0.0f);
     for (size_t i = 0; i < hidden_dim; ++i) {
-        float swish = z1[i] / (1 + std::exp(-z1[i]));
-        float sigmoid = 1 / (1 + std::exp(-z1[i]));
-        float linear = 0.0f;
-        for (size_t j = 0; j < hidden_dim; ++j) {
-            linear += v.data[i * hidden_dim + j] * z1[j];
+        z2.grad[i] = dh[i] * z1.data[i];
+
+        for (size_t j = 0; j < x.size; ++j) {
+            v.grad[i * x.size + j] += z2.grad[i] * x.data[j]; // Gradient of v
         }
-        float dswish = sigmoid * (1 + z1[i] * (1 - sigmoid));
-        dz1[i] = dh[i] * (linear * dswish);
+
+        float dswish = dh[i] * z2.data[i], exp_z1 = std::exp(z1.data[i]);
+        dz1[i] = dswish * ((exp_z1 * (z1.data[i] + exp_z1 + 1)) / std::pow((exp_z1 + 1), 2));
     }
 
     for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < hidden_dim; ++j) {
-            v.grad[i * hidden_dim + j] += dz1[i] * z1[j];
+        for (size_t j = 0; j < x.size; ++j) {
+            w1.grad[i * x.size + j] += dz1[i] * x.data[j];
+            x.grad[j] += dz1[i] * w1.data[i * x.size + j];
         }
     }
 
-    std::vector<float> dx(x.size(), 0.0f);
-    for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < x.size(); ++j) {
-            w1.grad[i * x.size() + j] += dz1[i] * x[j];
-            dx[j] += dz1[i] * w1.data[i * x.size() + j];
-        }
-    }
-
-    return dx;
+    return x;
 }
 
 nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
@@ -137,7 +156,6 @@ void nn::AdamW::update(std::vector<nn::Tensor> parameters, int t) {
 #pragma omp parallel for
     for (size_t i = 0; i < parameters.size(); ++i) {
         nn::Tensor &param = parameters[i];
-
         for (size_t j = 0; j < param.size; ++j) {
             m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param.grad[j];
             v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param.grad[j] * param.grad[j]);

@@ -15,6 +15,7 @@ struct Tensor {
     std::vector<size_t> shape;
 
     Tensor(std::vector<size_t> shape, size_t size);
+    Tensor(std::vector<size_t> shape, size_t size, float init);
 };
 
 struct Module {
@@ -39,11 +40,11 @@ class FeedForwardNN : public Module {
     FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
 
     std::vector<Tensor> parameters() override;
-    std::vector<float> forward(std::vector<float> &x);
-    std::vector<float> backward(std::vector<float> &x, std::vector<float> &dout);
+    nn::Tensor forward(Tensor &x);
+    nn::Tensor backward(Tensor &x, Tensor &dout);
 
   private:
-    Tensor w1, v, w2, b2;
-    std::vector<float> z1, h;
+    Tensor w1, v, w2, b2; // Parameters
+    Tensor z1, z2, h;     // Activations
 };
 }; // namespace nn
