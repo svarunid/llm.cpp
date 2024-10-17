@@ -100,7 +100,90 @@ void nn::Embedding::backward(int token, Tensor &dout) {
     }
 }
 
-/*Initialize FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
+/*Layer Normalization. Takes a 1D Tensor and noramlizes it.*/
+nn::LayerNorm::LayerNorm(size_t *input_dim)
+    : w(nn::Tensor({*input_dim}, *input_dim)), b(nn::Tensor({*input_dim}, *input_dim)),
+      mean(nn::Tensor({*input_dim}, *input_dim, 0.0f)),
+      rstd(nn::Tensor({*input_dim}, *input_dim, 0.0f)) {}
+
+/*Get parameters of LayerNorm.*/
+vector<nn::Tensor *> nn::LayerNorm::parameters() {
+    return {&w, &b};
+}
+
+/*Get parameters of LayerNorm along with activation.*/
+vector<nn::Tensor *> nn::LayerNorm::_parameters() {
+    return {&w, &b, &mean, &rstd};
+}
+
+nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
+    size_t rows = x.shape[0], cols = x.shape[1];
+
+    // Calculate mean
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            mean.data[i] += x.data[i * rows + j];
+        }
+        mean.data[i] /= cols;
+    }
+
+    // Calculate standard deviation
+    for (size_t i = 0; i < rows; ++i) {
+        float v = 0.0f;
+        for (size_t j = 0; j < cols; ++j) {
+            float xshift = x.data[i * rows + j] - mean.data[i];
+            v += xshift * xshift;
+        }
+        rstd.data[i] = 1.0f / std::sqrt((v / cols) + 1e-5f);
+    }
+
+    // Normalize, scale & shift inputs
+    nn::Tensor out({rows, cols}, rows * cols, 0.0f);
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            size_t index = i * rows + j;
+
+            float n = rstd.data[i] * (x.data[index] - mean.data[i]);
+            out.data[index] = n * w.data[i] + b.data[i];
+        }
+    }
+
+    return out;
+}
+
+nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
+    size_t rows = x.shape[0], cols = x.shape[1];
+
+    std::vector<float> dnorm_mean(rows, 0.0f);
+    std::vector<float> dnorm_norm_mean(rows, 0.0f);
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            size_t index = i * rows + j;
+
+            float dnorm = dout.grad[index] * w.data[i];
+            dnorm_mean[i] += dnorm;
+            dnorm_norm_mean[i] += dnorm * rstd.data[i] * (x.data[index] - mean.data[i]);
+        }
+        dnorm_mean[i] /= cols;
+        dnorm_norm_mean[i] /= cols;
+    }
+
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            size_t index = i * rows + j;
+
+            float norm = rstd.data[i] * (x.data[index] - mean.data[i]);
+            float dnorm = dout.grad[index] * w.data[i];
+
+            b.grad[i] += dout.grad[index];
+            w.grad[i] += norm * dout.grad[index];
+
+            x.grad[index] += ((dnorm - dnorm_mean[i]) - (norm * dnorm_norm_mean[i])) * rstd.data[i];
+        }
+    }
+}
+
+/*FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
 nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
       v({input_dim, hidden_dim}, input_dim * hidden_dim),
@@ -156,7 +239,7 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
 }
 
 /*Backpropagation of FeedForwardNN to find gradients of the parameters.*/
-nn::Tensor nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
+nn::Tensor *nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
     assert(dout.shape == b2.shape);
     size_t hidden_dim = w1.shape[0];
 
@@ -189,7 +272,7 @@ nn::Tensor nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
         }
     }
 
-    return x;
+    return &x;
 }
 
 /*AdamW optimizer with weight decay.*/

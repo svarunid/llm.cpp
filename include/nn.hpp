@@ -50,6 +50,21 @@ class Embedding : public Module {
     Tensor emb;
 };
 
+class LayerNorm : public Module {
+  public:
+    LayerNorm(size_t *input_dim);
+
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
+
+    Tensor operator()(Tensor &x);
+    Tensor *backward(Tensor &x, Tensor &dout);
+
+  private:
+    Tensor w, b;
+    Tensor mean, rstd;
+};
+
 class FeedForwardNN : public Module {
   public:
     FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
@@ -58,10 +73,10 @@ class FeedForwardNN : public Module {
     std::vector<Tensor *> _parameters() override;
 
     Tensor operator()(Tensor &x);
-    Tensor backward(Tensor &x, Tensor &dout);
+    Tensor *backward(Tensor &x, Tensor &dout);
 
   private:
-    Tensor w1, v, w2, b2; // Parameters
-    Tensor z1, z2, h;     // Activations
+    Tensor w1, v, w2, b2;
+    Tensor z1, z2, h;
 };
 }; // namespace nn
