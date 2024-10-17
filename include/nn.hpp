@@ -52,7 +52,7 @@ class Embedding : public Module {
 
 class LayerNorm : public Module {
   public:
-    LayerNorm(size_t *input_dim);
+    LayerNorm(size_t input_dim);
 
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;

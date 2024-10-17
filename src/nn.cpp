@@ -101,10 +101,10 @@ void nn::Embedding::backward(int token, Tensor &dout) {
 }
 
 /*Layer Normalization. Takes a 1D Tensor and noramlizes it.*/
-nn::LayerNorm::LayerNorm(size_t *input_dim)
-    : w(nn::Tensor({*input_dim}, *input_dim)), b(nn::Tensor({*input_dim}, *input_dim)),
-      mean(nn::Tensor({*input_dim}, *input_dim, 0.0f)),
-      rstd(nn::Tensor({*input_dim}, *input_dim, 0.0f)) {}
+nn::LayerNorm::LayerNorm(size_t input_dim)
+    : w(nn::Tensor({input_dim}, input_dim)), b(nn::Tensor({input_dim}, input_dim)),
+      mean(nn::Tensor({input_dim}, input_dim, 0.0f)),
+      rstd(nn::Tensor({input_dim}, input_dim, 0.0f)) {}
 
 /*Get parameters of LayerNorm.*/
 vector<nn::Tensor *> nn::LayerNorm::parameters() {
@@ -116,6 +116,7 @@ vector<nn::Tensor *> nn::LayerNorm::_parameters() {
     return {&w, &b, &mean, &rstd};
 }
 
+/*Calculate forward pass for LayerNorm*/
 nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     size_t rows = x.shape[0], cols = x.shape[1];
 
@@ -151,6 +152,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     return out;
 }
 
+/*Backpropagation of LayerNorm to find gradients of the parameters.*/
 nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
     size_t rows = x.shape[0], cols = x.shape[1];
 
