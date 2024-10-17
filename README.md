@@ -9,6 +9,4 @@ The goal of this project is, for me to able to write softwares comfortably in C/
 Once I have accomplished above, I'll try to train a small version (124M) of GPT-2 on the [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) dataset by HuggingFace. Though I don't intend this model to compete with LLMs, I want the experience of orchestrating a workflow of training such large models.
 
 ## Structure
-The code for different layer of a neural network lives in [`include/nn.hpp`](include/nn.hpp) file while the implementation can be found in [`src/nn.cpp`](src/nn.cpp). 
-
-The library is tested using `gtest` framework and the test live in `tests/` directory.
+The code for different layer of a neural network lives in [`include/nn.hpp`](include/nn.hpp) file while the implementation can be found in [`src/nn.cpp`](src/nn.cpp). The library is tested using `gtest` framework and the test live in `tests/` directory.
