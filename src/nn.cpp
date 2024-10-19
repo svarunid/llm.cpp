@@ -121,7 +121,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     // Calculate mean
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            mean.data[i] += x.data[i + cols * j];
+            mean.data[i] += x.data[i * rows + j];
         }
         mean.data[i] /= cols;
     }
@@ -130,7 +130,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     for (size_t i = 0; i < rows; ++i) {
         float v = 0.0f;
         for (size_t j = 0; j < cols; ++j) {
-            float xshift = x.data[i + cols * j] - mean.data[i];
+            float xshift = x.data[i * rows + j] - mean.data[i];
             v += xshift * xshift;
         }
         rstd.data[i] = 1.0f / std::sqrt((v / cols) + 1e-5f);
@@ -140,7 +140,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     nn::Tensor out({rows, cols}, rows * cols, 0.0f);
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i + cols * j;
+            size_t index = i * rows + j;
 
             float n = rstd.data[i] * (x.data[index] - mean.data[i]);
             out.data[index] = n * w.data[i] + b.data[i];
@@ -158,7 +158,7 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
     std::vector<float> dnorm_norm_mean(rows, 0.0f);
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i + cols * j;
+            size_t index = i * rows + j;
 
             float dnorm = dout.grad[index] * w.data[i];
             dnorm_mean[i] += dnorm;
@@ -170,7 +170,7 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
 
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i + cols * j;
+            size_t index = i * rows + j;
 
             float norm = rstd.data[i] * (x.data[index] - mean.data[i]);
             float dnorm = dout.grad[index] * w.data[i];
