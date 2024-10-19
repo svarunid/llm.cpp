@@ -121,7 +121,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     // Calculate mean
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            mean.data[i] += x.data[i * rows + j];
+            mean.data[i] += x.data[i + cols * j];
         }
         mean.data[i] /= cols;
     }
@@ -130,7 +130,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     for (size_t i = 0; i < rows; ++i) {
         float v = 0.0f;
         for (size_t j = 0; j < cols; ++j) {
-            float xshift = x.data[i * rows + j] - mean.data[i];
+            float xshift = x.data[i + cols * j] - mean.data[i];
             v += xshift * xshift;
         }
         rstd.data[i] = 1.0f / std::sqrt((v / cols) + 1e-5f);
@@ -140,7 +140,7 @@ nn::Tensor nn::LayerNorm::operator()(Tensor &x) {
     nn::Tensor out({rows, cols}, rows * cols, 0.0f);
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i * rows + j;
+            size_t index = i + cols * j;
 
             float n = rstd.data[i] * (x.data[index] - mean.data[i]);
             out.data[index] = n * w.data[i] + b.data[i];
@@ -158,7 +158,7 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
     std::vector<float> dnorm_norm_mean(rows, 0.0f);
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i * rows + j;
+            size_t index = i + cols * j;
 
             float dnorm = dout.grad[index] * w.data[i];
             dnorm_mean[i] += dnorm;
@@ -170,7 +170,7 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
 
     for (size_t i = 0; i < rows; ++i) {
         for (size_t j = 0; j < cols; ++j) {
-            size_t index = i * rows + j;
+            size_t index = i + cols * j;
 
             float norm = rstd.data[i] * (x.data[index] - mean.data[i]);
             float dnorm = dout.grad[index] * w.data[i];
@@ -190,9 +190,9 @@ nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t out
                                  const std::function<float()> &gen)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
       v({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
-      w2({hidden_dim, output_dim}, hidden_dim * output_dim, gen),
-      b2({1, output_dim}, output_dim, gen), z1({1, hidden_dim}, hidden_dim, 0.0f),
-      z2({1, hidden_dim}, hidden_dim, 0.0f), h({1, hidden_dim}, hidden_dim, 0.0f) {}
+      w2({hidden_dim, output_dim}, hidden_dim * output_dim, gen), b2({output_dim}, output_dim, gen),
+      z1({hidden_dim}, hidden_dim, 0.0f), z2({hidden_dim}, hidden_dim, 0.0f),
+      h({hidden_dim}, hidden_dim, 0.0f) {}
 
 /*Get parameters of FeedForwardNN.*/
 vector<nn::Tensor *> nn::FeedForwardNN::parameters() {
@@ -206,15 +206,13 @@ vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
 
 /*Calculate the forward of FeedForwardNN.*/
 nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
-    assert(x.shape == (std::vector<size_t>{w1.shape[0]}));
-
     size_t hidden_dim = w1.shape.back();
     size_t output_dim = w2.shape.back();
 
     // w1 * x
     for (size_t i = 0; i < hidden_dim; ++i) {
         for (size_t j = 0; j < x.size; ++j) {
-            z1.data[i] += w1.data[i * x.size + j] * x.data[j];
+            z1.data[i] += w1.data[i + hidden_dim * j] * x.data[j];
         }
         // Swish(z1)
         z1.data[i] = z1.data[i] / (1 + std::exp(-z1.data[i]));
@@ -222,9 +220,8 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
 
     // Swish(z1) * (v * x)
     for (size_t i = 0; i < hidden_dim; ++i) {
-        z2.data[i] = 0.0f;
         for (size_t j = 0; j < x.size; ++j) {
-            z2.data[i] += v.data[i * x.size + j] * x.data[j];
+            z2.data[i] += v.data[i + hidden_dim * j] * x.data[j];
         }
         h.data[i] = z1.data[i] * z2.data[i];
     }
@@ -233,7 +230,7 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
     nn::Tensor y({output_dim}, output_dim, 0.0f);
     for (size_t i = 0; i < output_dim; ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
-            y.data[i] += w2.data[i * hidden_dim + j] * h.data[j];
+            y.data[i] += w2.data[i + hidden_dim * j] * h.data[j];
         }
         y.data[i] += b2.data[i];
     }
@@ -243,14 +240,14 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
 
 /*Backpropagation of FeedForwardNN to find gradients of the parameters.*/
 nn::Tensor *nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
-    assert(dout.shape == b2.shape);
-    size_t hidden_dim = w1.shape[0];
+    size_t hidden_dim = w1.shape.back();
+    size_t output_dim = w2.shape.back();
 
     // Gradient of h, w2 & b2.
-    for (size_t i = 0; i < w2.shape.back(); ++i) {
+    for (size_t i = 0; i < output_dim; ++i) {
         for (size_t j = 0; j < hidden_dim; ++j) {
-            w2.grad[i * hidden_dim + j] += dout.grad[i] * h.data[j];
-            h.grad[j] += dout.grad[i] * w2.data[i * hidden_dim + j];
+            w2.grad[i + output_dim * j] += dout.grad[i] * h.data[j];
+            h.grad[j] += dout.grad[i] * w2.data[i + output_dim * j];
         }
         b2.grad[i] += dout.grad[i];
     }
@@ -260,7 +257,7 @@ nn::Tensor *nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
         z2.grad[i] = h.grad[i] * z1.data[i];
 
         for (size_t j = 0; j < x.size; ++j) {
-            v.grad[i * x.size + j] += z2.grad[i] * x.data[j];
+            v.grad[i + hidden_dim * j] += z2.grad[i] * x.data[j];
         }
 
         float dswish = h.grad[i] * z2.data[i], exp_z1 = std::exp(z1.data[i]);
@@ -270,8 +267,8 @@ nn::Tensor *nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
     // Gradient of w1 & x.
     for (size_t i = 0; i < hidden_dim; ++i) {
         for (size_t j = 0; j < x.size; ++j) {
-            w1.grad[i * x.size + j] += z1.grad[i] * x.data[j];
-            x.grad[j] += z1.grad[i] * w1.data[i * x.size + j];
+            w1.grad[i + hidden_dim * j] += z1.grad[i] * x.data[j];
+            x.grad[j] += z1.grad[i] * w1.data[i + hidden_dim * j];
         }
     }
 
