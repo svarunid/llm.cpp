@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include <iostream>
 #include <nn.hpp>
 #include <random>
@@ -9,11 +10,8 @@
 
 using namespace std;
 
-std::default_random_engine nn::e;
-std::uniform_real_distribution<float> nn::dist(0.0f, 1.0f);
-
-/*Tensor with the given shape and size and populate elements using uniform distribution*/
-nn::Tensor::Tensor(vector<size_t> shape, size_t size)
+/*Tensor with the given shape and size and populate elements using generator method*/
+nn::Tensor::Tensor(vector<size_t> shape, size_t size, const std::function<float()> &gen)
     : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
     size_t calculatedSize = 1;
     for (size_t dim : shape) {
@@ -26,7 +24,7 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size)
     }
 
     for (size_t i = 0; i < size; i++) {
-        data[i] = dist(e);
+        data[i] = gen();
         grad[i] = 0.0f;
     }
 };
@@ -70,8 +68,8 @@ void nn::Module::zero_grad() {
 }
 
 /*Initialize FeedForwardNN with given vocabulary size and model dimensions.*/
-nn::Embedding::Embedding(size_t vocab_size, size_t emb_dim)
-    : emb(nn::Tensor({vocab_size, emb_dim}, vocab_size * emb_dim)) {}
+nn::Embedding::Embedding(size_t vocab_size, size_t emb_dim, const std::function<float()> &gen)
+    : emb(nn::Tensor({vocab_size, emb_dim}, vocab_size * emb_dim, gen)) {}
 
 /*Get parameters of Embedding.*/
 vector<nn::Tensor *> nn::Embedding::parameters() {
@@ -85,7 +83,7 @@ vector<nn::Tensor *> nn::Embedding::_parameters() {
 
 /*Calculate the forward of Embedding.*/
 nn::Tensor nn::Embedding::operator()(int token) {
-    Tensor out({emb.shape.back()}, emb.shape.back());
+    Tensor out({emb.shape.back()}, emb.shape.back(), 0.0f);
     for (size_t i = 0; i < emb.shape.back(); ++i) {
         out.data[i] = emb.data[i * token];
     }
@@ -101,8 +99,8 @@ void nn::Embedding::backward(int token, Tensor &dout) {
 }
 
 /*Layer Normalization. Takes a 1D Tensor and noramlizes it.*/
-nn::LayerNorm::LayerNorm(size_t input_dim)
-    : w(nn::Tensor({input_dim}, input_dim)), b(nn::Tensor({input_dim}, input_dim)),
+nn::LayerNorm::LayerNorm(size_t input_dim, const std::function<float()> &gen)
+    : w(nn::Tensor({input_dim}, input_dim, gen)), b(nn::Tensor({input_dim}, input_dim, gen)),
       mean(nn::Tensor({input_dim}, input_dim, 0.0f)),
       rstd(nn::Tensor({input_dim}, input_dim, 0.0f)) {}
 
@@ -180,18 +178,21 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
             b.grad[i] += dout.grad[index];
             w.grad[i] += norm * dout.grad[index];
 
-            x.grad[index] += ((dnorm - dnorm_mean[i]) - (norm * dnorm_norm_mean[i])) * rstd.data[i];
+            x.grad[index] += (dnorm - dnorm_mean[i] - norm * dnorm_norm_mean[i]) * rstd.data[i];
         }
     }
+
+    return &x;
 }
 
 /*FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
-nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim)
-    : w1({input_dim, hidden_dim}, input_dim * hidden_dim),
-      v({input_dim, hidden_dim}, input_dim * hidden_dim),
-      w2({hidden_dim, output_dim}, hidden_dim * output_dim), b2({1, output_dim}, output_dim),
-      z1({1, hidden_dim}, hidden_dim, 0.0f), z2({1, hidden_dim}, hidden_dim, 0.0f),
-      h({1, hidden_dim}, hidden_dim, 0.0f) {}
+nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim,
+                                 const std::function<float()> &gen)
+    : w1({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
+      v({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
+      w2({hidden_dim, output_dim}, hidden_dim * output_dim, gen),
+      b2({1, output_dim}, output_dim, gen), z1({1, hidden_dim}, hidden_dim, 0.0f),
+      z2({1, hidden_dim}, hidden_dim, 0.0f), h({1, hidden_dim}, hidden_dim, 0.0f) {}
 
 /*Get parameters of FeedForwardNN.*/
 vector<nn::Tensor *> nn::FeedForwardNN::parameters() {

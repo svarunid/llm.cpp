@@ -1,20 +1,18 @@
 #pragma once
 
+#include <functional>
 #include <random>
 #include <stddef.h>
 #include <vector>
 
 namespace nn {
-extern std::default_random_engine e;
-extern std::uniform_real_distribution<float> dist;
-
 struct Tensor {
     size_t size;
     std::vector<float> data;
     std::vector<float> grad;
     std::vector<size_t> shape;
 
-    Tensor(std::vector<size_t> shape, size_t size);
+    Tensor(std::vector<size_t> shape, size_t size, const std::function<float()> &gen);
     Tensor(std::vector<size_t> shape, size_t size, float init);
 };
 
@@ -38,7 +36,7 @@ class AdamW {
 
 class Embedding : public Module {
   public:
-    Embedding(size_t vocab_size, size_t emb_dim);
+    Embedding(size_t vocab_size, size_t emb_dim, const std::function<float()> &gen);
 
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
@@ -52,7 +50,7 @@ class Embedding : public Module {
 
 class LayerNorm : public Module {
   public:
-    LayerNorm(size_t input_dim);
+    LayerNorm(size_t input_dim, const std::function<float()> &gen);
 
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
@@ -67,7 +65,8 @@ class LayerNorm : public Module {
 
 class FeedForwardNN : public Module {
   public:
-    FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim);
+    FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim,
+                  const std::function<float()> &gen);
 
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
