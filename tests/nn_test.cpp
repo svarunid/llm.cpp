@@ -3,8 +3,6 @@
 #include <random>
 #include <stdexcept>
 
-using namespace nn;
-
 // Test if the tensor is created with appropriate shapes.
 TEST(Tensor, ShapeMismatch) {
     std::default_random_engine e;
@@ -13,7 +11,7 @@ TEST(Tensor, ShapeMismatch) {
     std::vector<size_t> shape{10, 5};
     const auto gen = [&e, &dist]() { return dist(e); };
 
-    EXPECT_THROW(Tensor x(shape, 60, gen), std::invalid_argument)
+    EXPECT_THROW(nn::Tensor x(shape, 60, gen), std::invalid_argument)
         << "Doesn't throw errors when there is a shape & size mismatch";
 }
 
@@ -25,7 +23,7 @@ TEST(Tensor, HasCorrectSize) {
     std::vector<size_t> shape{10, 5};
     const auto gen = [&e, &dist]() { return dist(e); };
 
-    Tensor x(shape, 50, gen);
+    nn::Tensor x(shape, 50, gen);
     EXPECT_EQ(x.data.size(), 50);
     EXPECT_EQ(x.grad.size(), 50);
 }
@@ -40,16 +38,65 @@ std::function<float()> init() {
     return gen;
 }
 
+// Testing layer normalization module
+// Fixture for LayerNorm.
+class LayerNormTest : public testing::Test {
+  protected:
+    LayerNormTest() : ln(3, init()) {}
+
+    nn::LayerNorm ln;
+};
+
+TEST_F(LayerNormTest, CheckParameterList) {
+    std::vector<nn::Tensor *> model_parameters = ln.parameters();
+    std::vector<nn::Tensor *> model_parameters_with_activations = ln._parameters();
+
+    ASSERT_EQ(model_parameters.size(), 2)
+        << "Model Parameters: " << 2 << " expected " << model_parameters.size() << " received.";
+    ASSERT_EQ(model_parameters_with_activations.size(), 4)
+        << "Model parameters with activations: " << 4 << " expected "
+        << model_parameters_with_activations.size() << " received.";
+}
+
+TEST_F(LayerNormTest, InitCheck) {
+    std::vector<nn::Tensor *> parameters = ln.parameters();
+
+    // Check if the parameters have correct shapes.
+    ASSERT_EQ(parameters[0]->shape, (std::vector<size_t>{3}));
+    ASSERT_EQ(parameters[1]->shape, (std::vector<size_t>{3}));
+}
+
+TEST_F(LayerNormTest, ForwardAndBackwardPass) {
+    nn::Tensor x({1, 3}, 3, 3.0f);
+
+    nn::Tensor y = ln(x);
+
+    for (size_t i = 0; i < y.size; ++i) {
+        y.grad[i] = 0.5f;
+    }
+    ln.backward(x, y);
+
+    EXPECT_FLOAT_EQ(4, y.data[0]);
+    EXPECT_FLOAT_EQ(4, y.data[1]);
+    EXPECT_FLOAT_EQ(4, y.data[2]);
+
+    EXPECT_FLOAT_EQ(0, x.grad[0]);
+    EXPECT_FLOAT_EQ(0, x.grad[1]);
+    EXPECT_FLOAT_EQ(0, x.grad[2]);
+}
+
+// Testing feed forword neural network module.
+// Fixture for FeedForwardNN.
 class FeedForwardNNTest : public testing::Test {
   protected:
     FeedForwardNNTest() : ffnn(3, 2, 1, init()) {}
 
-    FeedForwardNN ffnn;
+    nn::FeedForwardNN ffnn;
 };
 
 TEST_F(FeedForwardNNTest, CheckParameterList) {
-    std::vector<Tensor *> model_parameters = ffnn.parameters();
-    std::vector<Tensor *> model_parameters_with_activations = ffnn._parameters();
+    std::vector<nn::Tensor *> model_parameters = ffnn.parameters();
+    std::vector<nn::Tensor *> model_parameters_with_activations = ffnn._parameters();
 
     ASSERT_EQ(model_parameters.size(), 4)
         << "Model Parameters: " << 4 << " expected " << model_parameters.size() << " received.";
@@ -59,7 +106,7 @@ TEST_F(FeedForwardNNTest, CheckParameterList) {
 }
 
 TEST_F(FeedForwardNNTest, InitCheck) {
-    std::vector<Tensor *> parameters = ffnn.parameters();
+    std::vector<nn::Tensor *> parameters = ffnn.parameters();
 
     // Check if the parameters have correct shapes.
     ASSERT_EQ(parameters[0]->shape, (std::vector<size_t>{3, 2}));
@@ -69,14 +116,15 @@ TEST_F(FeedForwardNNTest, InitCheck) {
 }
 
 TEST_F(FeedForwardNNTest, ForwardAndBackwardPass) {
-    Tensor x({3}, 3, 3.0f);
+    nn::Tensor x({3}, 3, 3.0f);
 
-    Tensor y = ffnn(x);
+    nn::Tensor y = ffnn(x);
 
     y.grad[0] = 0.5f;
     ffnn.backward(x, y);
 
     EXPECT_FLOAT_EQ(28446, y.data[0]);
+
     EXPECT_FLOAT_EQ(1786.5, x.grad[0]);
     EXPECT_FLOAT_EQ(4099.5, x.grad[1]);
     EXPECT_FLOAT_EQ(6412.5, x.grad[2]);

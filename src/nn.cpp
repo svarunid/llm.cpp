@@ -8,11 +8,10 @@
 #include <stdexcept>
 #include <vector>
 
-using namespace std;
-
 /*Tensor with the given shape and size and populate elements using generator method*/
-nn::Tensor::Tensor(vector<size_t> shape, size_t size, const std::function<float()> &gen)
-    : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
+nn::Tensor::Tensor(std::vector<size_t> shape, size_t size, const std::function<float()> &gen)
+    : shape(shape), data(std::vector<float>(size)), grad(std::vector<float>(size, 0.0f)),
+      size(size) {
     size_t calculatedSize = 1;
     for (size_t dim : shape) {
         calculatedSize *= dim;
@@ -30,8 +29,9 @@ nn::Tensor::Tensor(vector<size_t> shape, size_t size, const std::function<float(
 };
 
 /*Tensor with the given shape and size and intialize elements to `init`*/
-nn::Tensor::Tensor(vector<size_t> shape, size_t size, float init)
-    : shape(shape), data(vector<float>(size)), grad(vector<float>(size, 0.0f)), size(size) {
+nn::Tensor::Tensor(std::vector<size_t> shape, size_t size, float init)
+    : shape(shape), data(std::vector<float>(size)), grad(std::vector<float>(size, 0.0f)),
+      size(size) {
     size_t calculatedSize = 1;
     for (size_t dim : shape) {
         calculatedSize *= dim;
@@ -72,12 +72,12 @@ nn::Embedding::Embedding(size_t vocab_size, size_t emb_dim, const std::function<
     : emb(nn::Tensor({vocab_size, emb_dim}, vocab_size * emb_dim, gen)) {}
 
 /*Get parameters of Embedding.*/
-vector<nn::Tensor *> nn::Embedding::parameters() {
+std::vector<nn::Tensor *> nn::Embedding::parameters() {
     return {&emb};
 }
 
 /*Get parameters of Embedding along with activation.*/
-vector<nn::Tensor *> nn::Embedding::_parameters() {
+std::vector<nn::Tensor *> nn::Embedding::_parameters() {
     return {&emb};
 }
 
@@ -105,12 +105,12 @@ nn::LayerNorm::LayerNorm(size_t input_dim, const std::function<float()> &gen)
       rstd(nn::Tensor({input_dim}, input_dim, 0.0f)) {}
 
 /*Get parameters of LayerNorm.*/
-vector<nn::Tensor *> nn::LayerNorm::parameters() {
+std::vector<nn::Tensor *> nn::LayerNorm::parameters() {
     return {&w, &b};
 }
 
 /*Get parameters of LayerNorm along with activation.*/
-vector<nn::Tensor *> nn::LayerNorm::_parameters() {
+std::vector<nn::Tensor *> nn::LayerNorm::_parameters() {
     return {&w, &b, &mean, &rstd};
 }
 
@@ -195,12 +195,12 @@ nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t out
       h({hidden_dim}, hidden_dim, 0.0f) {}
 
 /*Get parameters of FeedForwardNN.*/
-vector<nn::Tensor *> nn::FeedForwardNN::parameters() {
+std::vector<nn::Tensor *> nn::FeedForwardNN::parameters() {
     return {&w1, &v, &w2, &b2};
 }
 
 /*Get parameters of FeedForwardNN along with activation.*/
-vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
+std::vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
     return {&w1, &v, &w2, &b2, &z1, &z2, &h};
 }
 
