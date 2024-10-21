@@ -41,8 +41,8 @@ class Embedding : public Module {
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
 
-    Tensor operator()(int token);
-    void backward(int token, Tensor &dout);
+    Tensor operator()(std::vector<int> tokens);
+    void backward(std::vector<int> tokens, Tensor &dout);
 
   private:
     Tensor emb;
@@ -65,7 +65,7 @@ class LayerNorm : public Module {
 
 class FeedForwardNN : public Module {
   public:
-    FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim,
+    FeedForwardNN(size_t num_batch, size_t input_dim, size_t hidden_dim, size_t output_dim,
                   const std::function<float()> &gen);
 
     std::vector<Tensor *> parameters() override;
@@ -78,4 +78,25 @@ class FeedForwardNN : public Module {
     Tensor w1, v, w2, b2;
     Tensor z1, z2, h;
 };
+
+class MultiHeadAttention : public Module {
+  public:
+    MultiHeadAttention(size_t emb_dim, size_t num_heads, const std::function<float()> &gen);
+
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
+
+    Tensor operator()(Tensor &x);
+    Tensor *backward(Tensor &x, Tensor &dout);
+
+  private:
+    size_t num_heads;
+    Tensor wq, wk, wv;
+};
+
+Tensor softmax(Tensor &x);
+Tensor softmax_backward(Tensor &x, Tensor &dout);
+
+Tensor cross_entropy_loss(Tensor &x, Tensor &y);
+Tensor cross_entropy_loss_backward(Tensor &x, Tensor &y, Tensor &dout);
 }; // namespace nn

@@ -89,7 +89,7 @@ TEST_F(LayerNormTest, ForwardAndBackwardPass) {
 // Fixture for FeedForwardNN.
 class FeedForwardNNTest : public testing::Test {
   protected:
-    FeedForwardNNTest() : ffnn(3, 2, 1, init()) {}
+    FeedForwardNNTest() : ffnn(1, 3, 2, 1, init()) {}
 
     nn::FeedForwardNN ffnn;
 };
@@ -116,16 +116,16 @@ TEST_F(FeedForwardNNTest, InitCheck) {
 }
 
 TEST_F(FeedForwardNNTest, ForwardAndBackwardPass) {
-    nn::Tensor x({3}, 3, 3.0f);
+    nn::Tensor x({1, 3}, 3, 3.0f);
 
     nn::Tensor y = ffnn(x);
 
     y.grad[0] = 0.5f;
     ffnn.backward(x, y);
 
-    EXPECT_FLOAT_EQ(28446, y.data[0]);
+    EXPECT_FLOAT_EQ(73806, y.data[0]);
 
-    EXPECT_FLOAT_EQ(1786.5, x.grad[0]);
-    EXPECT_FLOAT_EQ(4099.5, x.grad[1]);
-    EXPECT_FLOAT_EQ(6412.5, x.grad[2]);
+    EXPECT_FLOAT_EQ(4738.5, x.grad[0]);
+    EXPECT_FLOAT_EQ(7560, x.grad[1]);
+    EXPECT_FLOAT_EQ(0, x.grad[2]);
 }

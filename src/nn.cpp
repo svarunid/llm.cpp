@@ -67,6 +67,33 @@ void nn::Module::zero_grad() {
     }
 }
 
+/*AdamW optimizer with weight decay.*/
+nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
+                 std::vector<nn::Tensor *> parameters)
+    : lr(lr), beta_1(beta_1), beta_2(beta_2), eps(eps), weight_decay(weight_decay) {
+    for (auto &param : parameters) {
+        m.push_back(std::vector<float>(param->size, 0.0f));
+        v.push_back(std::vector<float>(param->size, 0.0f));
+    }
+};
+
+/*Update parameters based on AdamW*/
+void nn::AdamW::update(std::vector<nn::Tensor *> parameters, int t) {
+    for (size_t i = 0; i < parameters.size(); ++i) {
+        nn::Tensor *param = parameters[i];
+        for (size_t j = 0; j < param->size; ++j) {
+            m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param->grad[j];
+            v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param->grad[j] * param->grad[j]);
+
+            float m_hat = m[i][j] / (1 - std::pow(beta_1, t));
+            float v_hat = v[i][j] / (1 - std::pow(beta_2, t));
+
+            param->data[j] -=
+                lr * (m_hat / (std::sqrt(v_hat) + eps) + weight_decay * param->data[j]);
+        }
+    }
+}
+
 /*Initialize FeedForwardNN with given vocabulary size and model dimensions.*/
 nn::Embedding::Embedding(size_t vocab_size, size_t emb_dim, const std::function<float()> &gen)
     : emb(nn::Tensor({vocab_size, emb_dim}, vocab_size * emb_dim, gen)) {}
@@ -82,19 +109,23 @@ std::vector<nn::Tensor *> nn::Embedding::_parameters() {
 }
 
 /*Calculate the forward of Embedding.*/
-nn::Tensor nn::Embedding::operator()(int token) {
-    Tensor out({emb.shape.back()}, emb.shape.back(), 0.0f);
-    for (size_t i = 0; i < emb.shape.back(); ++i) {
-        out.data[i] = emb.data[i * token];
+nn::Tensor nn::Embedding::operator()(std::vector<int> tokens) {
+    Tensor out({tokens.size(), emb.shape.back()}, tokens.size() * emb.shape.back(), 0.0f);
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        for (size_t j = 0; j < emb.shape.back(); ++j) {
+            out.data[emb.shape.back() * i + j] = emb.data[tokens[i] * emb.shape.back() + j];
+        }
     }
 
     return out;
 }
 
 /*Backpropagation to find gradients of the embeddings.*/
-void nn::Embedding::backward(int token, Tensor &dout) {
-    for (size_t i = 0; i < emb.shape.back(); ++i) {
-        emb.grad[token * emb.shape.back() + i] += dout.grad[i];
+void nn::Embedding::backward(std::vector<int> tokens, Tensor &dout) {
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        for (size_t j = 0; j < emb.shape.back(); ++j) {
+            emb.grad[tokens[i] * emb.shape.back() + j] += dout.grad[emb.shape.back() * i + j];
+        }
     }
 }
 
@@ -186,13 +217,14 @@ nn::Tensor *nn::LayerNorm::backward(Tensor &x, Tensor &dout) {
 }
 
 /*FeedForwardNN with given dimentions. Uses `SwiGLU` for activation.*/
-nn::FeedForwardNN::FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim,
-                                 const std::function<float()> &gen)
+nn::FeedForwardNN::FeedForwardNN(size_t num_batch, size_t input_dim, size_t hidden_dim,
+                                 size_t output_dim, const std::function<float()> &gen)
     : w1({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
       v({input_dim, hidden_dim}, input_dim * hidden_dim, gen),
-      w2({hidden_dim, output_dim}, hidden_dim * output_dim, gen), b2({output_dim}, output_dim, gen),
-      z1({hidden_dim}, hidden_dim, 0.0f), z2({hidden_dim}, hidden_dim, 0.0f),
-      h({hidden_dim}, hidden_dim, 0.0f) {}
+      w2({hidden_dim, output_dim}, hidden_dim * output_dim, gen),
+      z1({num_batch, hidden_dim}, num_batch * hidden_dim, 0.0f),
+      z2({num_batch, hidden_dim}, num_batch * hidden_dim, 0.0f),
+      h({num_batch, hidden_dim}, num_batch * hidden_dim, 0.0f), b2({output_dim}, output_dim, gen) {}
 
 /*Get parameters of FeedForwardNN.*/
 std::vector<nn::Tensor *> nn::FeedForwardNN::parameters() {
@@ -206,33 +238,46 @@ std::vector<nn::Tensor *> nn::FeedForwardNN::_parameters() {
 
 /*Calculate the forward of FeedForwardNN.*/
 nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
+    size_t input_dim = x.shape.back();
     size_t hidden_dim = w1.shape.back();
     size_t output_dim = w2.shape.back();
 
     // w1 * x
-    for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < x.size; ++j) {
-            z1.data[i] += w1.data[i + hidden_dim * j] * x.data[j];
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = hidden_dim * i;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            const size_t embj = batchi + j;
+            for (size_t k = 0; k < input_dim; ++k) {
+                z1.data[embj] += w1.data[j + hidden_dim * k] * x.data[input_dim * i + k];
+            }
+            // Swish(z1)
+            z1.data[embj] = z1.data[embj] / (1 + std::exp(-z1.data[embj]));
         }
-        // Swish(z1)
-        z1.data[i] = z1.data[i] / (1 + std::exp(-z1.data[i]));
     }
 
     // Swish(z1) * (v * x)
-    for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < x.size; ++j) {
-            z2.data[i] += v.data[i + hidden_dim * j] * x.data[j];
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = hidden_dim * i;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            const size_t embj = batchi + j;
+            for (size_t k = 0; k < input_dim; ++k) {
+                z2.data[embj] += v.data[j + hidden_dim * k] * x.data[input_dim * i + k];
+            }
+            h.data[embj] = z1.data[embj] * z2.data[embj];
         }
-        h.data[i] = z1.data[i] * z2.data[i];
     }
 
     // h * w2 + b2
-    nn::Tensor y({output_dim}, output_dim, 0.0f);
-    for (size_t i = 0; i < output_dim; ++i) {
-        for (size_t j = 0; j < hidden_dim; ++j) {
-            y.data[i] += w2.data[i + hidden_dim * j] * h.data[j];
+    nn::Tensor y({x.shape[0], output_dim}, output_dim, 0.0f);
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = output_dim * i;
+        for (size_t j = 0; j < output_dim; ++j) {
+            const size_t embj = batchi + j;
+            for (size_t k = 0; k < hidden_dim; ++k) {
+                y.data[embj] += w2.data[j + output_dim * k] * h.data[hidden_dim * i + k];
+            }
+            y.data[embj] += b2.data[j];
         }
-        y.data[i] += b2.data[i];
     }
 
     return y;
@@ -240,64 +285,81 @@ nn::Tensor nn::FeedForwardNN::operator()(nn::Tensor &x) {
 
 /*Backpropagation of FeedForwardNN to find gradients of the parameters.*/
 nn::Tensor *nn::FeedForwardNN::backward(nn::Tensor &x, nn::Tensor &dout) {
+    size_t input_dim = x.shape.back();
     size_t hidden_dim = w1.shape.back();
     size_t output_dim = w2.shape.back();
 
     // Gradient of h, w2 & b2.
-    for (size_t i = 0; i < output_dim; ++i) {
-        for (size_t j = 0; j < hidden_dim; ++j) {
-            w2.grad[i + output_dim * j] += dout.grad[i] * h.data[j];
-            h.grad[j] += dout.grad[i] * w2.data[i + output_dim * j];
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = output_dim * i;
+        for (size_t j = 0; j < output_dim; ++j) {
+            const size_t embj = batchi + j;
+            for (size_t k = 0; k < hidden_dim; ++k) {
+                w2.grad[j + output_dim * k] += dout.grad[embj] * h.data[hidden_dim * i + k];
+                h.grad[k] += dout.grad[embj] * w2.data[j + output_dim * k];
+            }
+            b2.grad[j] += dout.grad[embj];
         }
-        b2.grad[i] += dout.grad[i];
     }
 
     // Gradient of z1, z2 & v.
-    for (size_t i = 0; i < hidden_dim; ++i) {
-        z2.grad[i] = h.grad[i] * z1.data[i];
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = hidden_dim * i;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            const size_t embj = batchi + j;
+            z2.grad[embj] = h.grad[embj] * z1.data[embj];
 
-        for (size_t j = 0; j < x.size; ++j) {
-            v.grad[i + hidden_dim * j] += z2.grad[i] * x.data[j];
+            for (size_t k = 0; k < x.shape.back(); ++k) {
+                v.grad[j + hidden_dim * k] += z2.grad[embj] * x.data[input_dim * i + k];
+            }
+
+            float dswish = h.grad[embj] * z2.data[embj], exp_z1 = std::exp(z1.data[embj]);
+            z1.grad[embj] =
+                dswish * ((exp_z1 * (z1.data[embj] + exp_z1 + 1)) / std::pow((exp_z1 + 1), 2));
         }
-
-        float dswish = h.grad[i] * z2.data[i], exp_z1 = std::exp(z1.data[i]);
-        z1.grad[i] = dswish * ((exp_z1 * (z1.data[i] + exp_z1 + 1)) / std::pow((exp_z1 + 1), 2));
     }
 
     // Gradient of w1 & x.
-    for (size_t i = 0; i < hidden_dim; ++i) {
-        for (size_t j = 0; j < x.size; ++j) {
-            w1.grad[i + hidden_dim * j] += z1.grad[i] * x.data[j];
-            x.grad[j] += z1.grad[i] * w1.data[i + hidden_dim * j];
+    for (size_t i = 0; i < x.shape[0]; ++i) {
+        const size_t batchi = hidden_dim * i;
+        for (size_t j = 0; j < hidden_dim; ++j) {
+            const size_t embj = batchi + j;
+            for (size_t k = 0; k < x.shape.back(); ++k) {
+                w1.grad[j + hidden_dim * k] += z1.grad[embj] * x.data[input_dim * i + k];
+                x.grad[embj] += z1.grad[embj] * w1.data[j + hidden_dim * k];
+            }
         }
     }
 
     return &x;
 }
 
-/*AdamW optimizer with weight decay.*/
-nn::AdamW::AdamW(float lr, float beta_1, float beta_2, float eps, float weight_decay,
-                 std::vector<nn::Tensor *> parameters)
-    : lr(lr), beta_1(beta_1), beta_2(beta_2), eps(eps), weight_decay(weight_decay) {
-    for (auto &param : parameters) {
-        m.push_back(std::vector<float>(param->size, 0.0f));
-        v.push_back(std::vector<float>(param->size, 0.0f));
-    }
-};
+/*MultiHeadAttention with dimension `emb_size`.*/
+nn::MultiHeadAttention::MultiHeadAttention(size_t emb_dim, size_t num_heads,
+                                           const std::function<float()> &gen)
+    : num_heads(num_heads), wq(nn::Tensor({emb_dim, emb_dim}, emb_dim * emb_dim, gen)),
+      wk(nn::Tensor({emb_dim, emb_dim}, emb_dim * emb_dim, gen)),
+      wv(nn::Tensor({emb_dim, emb_dim}, emb_dim * emb_dim, gen)) {}
 
-/*Update parameters based on AdamW*/
-void nn::AdamW::update(std::vector<nn::Tensor *> parameters, int t) {
-    for (size_t i = 0; i < parameters.size(); ++i) {
-        nn::Tensor *param = parameters[i];
-        for (size_t j = 0; j < param->size; ++j) {
-            m[i][j] = beta_1 * m[i][j] + (1 - beta_1) * param->grad[j];
-            v[i][j] = beta_2 * v[i][j] + (1 - beta_2) * (param->grad[j] * param->grad[j]);
+/*Get parameters of MultiHeadAttention.*/
+std::vector<nn::Tensor *> nn::MultiHeadAttention::parameters() {
+    return {&wq, &wk, &wv};
+}
 
-            float m_hat = m[i][j] / (1 - std::pow(beta_1, t));
-            float v_hat = v[i][j] / (1 - std::pow(beta_2, t));
+nn::Tensor nn::MultiHeadAttention::operator()(Tensor &x) {
+    nn::Tensor out(x.shape, x.size, 0.0f);
 
-            param->data[j] -=
-                lr * (m_hat / (std::sqrt(v_hat) + eps) + weight_decay * param->data[j]);
+    nn::Tensor q({x.shape[0], num_heads, x.shape[1]}, x.size, 0.0f),
+        k({x.shape[0], num_heads, x.shape[1]}, x.size, 0.0f),
+        v({x.shape[0], num_heads, x.shape[1]}, x.size, 0.0f);
+
+    for (size_t i = 0; i < x.size; ++i) {
+        for (size_t j = 0; j < x.size; ++j) {
+            q.data[j] += wq.data[i + x.size * j] * x.data[j];
+            k.data[j] += wk.data[i + x.size * j] * x.data[j];
+            v.data[j] += wv.data[i + x.size * j] * x.data[j];
         }
     }
+
+    return out;
 }
