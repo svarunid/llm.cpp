@@ -358,67 +358,194 @@ std::vector<nn::Tensor *> nn::MultiHeadAttention::parameters() {
 
 /*Get parameters of MultiHeadAttention with activations.*/
 std::vector<nn::Tensor *> nn::MultiHeadAttention::_parameters() {
-    return {&wq, &wk, &wv, &wo, &q, &k, &v, &qk};
+    return {&wq, &wk, &wv, &wo, &q, &k, &v, &qk, &attn_out};
 }
 
 nn::Tensor nn::MultiHeadAttention::operator()(nn::Tensor &x) {
-    size_t seq = x.shape[0], emb = x.shape[1], dk = emb / num_heads;
-    nn::Tensor out(x.shape, x.size, 0.0f);
+    const size_t seq_len = x.shape[0];
+    const size_t emb_dim = x.shape[1];
+    const size_t head_dim = emb_dim / num_heads;
 
     if (q.size == 0) {
-        q = nn::Tensor({num_heads, seq, emb / num_heads}, x.size, 0.0f),
-        k = nn::Tensor({num_heads, seq, emb / num_heads}, x.size, 0.0f),
-        v = nn::Tensor({num_heads, seq, emb / num_heads}, x.size, 0.0f),
-        qk = nn::Tensor({num_heads, seq, seq}, num_heads * seq * seq, 0.0f);
+        q = nn::Tensor({num_heads, seq_len, head_dim}, num_heads * seq_len * head_dim, 0.0f),
+        k = nn::Tensor({num_heads, seq_len, head_dim}, num_heads * seq_len * head_dim, 0.0f),
+        v = nn::Tensor({num_heads, seq_len, head_dim}, num_heads * seq_len * head_dim, 0.0f),
+        qk = nn::Tensor({num_heads, seq_len, seq_len}, num_heads * seq_len * seq_len, 0.0f);
     }
 
-    // Compute q, k, v by multiplying the input x with respective weight matrices
     for (size_t h = 0; h < num_heads; ++h) {
-        for (size_t s = 0; s < seq; ++s) {
-            for (size_t dki = 0; dki < dk; ++dki) {
-                const size_t idx = h * seq * dk + s * dk + dki;
-                for (size_t e = 0; e < emb; ++e) {
-                    const size_t x_idx = s * emb + e;
-                    const size_t w_idx = e * emb + h * dk + dki;
-                    q.data[idx] += x.data[x_idx] * wq.data[w_idx];
-                    k.data[idx] += x.data[x_idx] * wk.data[w_idx];
-                    v.data[idx] += x.data[x_idx] * wv.data[w_idx];
+        for (size_t s = 0; s < seq_len; ++s) {
+            for (size_t d = 0; d < head_dim; ++d) {
+                const size_t head_idx = h * seq_len * head_dim + s * head_dim + d;
+                q.data[head_idx] = 0.0f;
+                k.data[head_idx] = 0.0f;
+                v.data[head_idx] = 0.0f;
+
+                for (size_t e = 0; e < emb_dim; ++e) {
+                    const size_t x_idx = s * emb_dim + e;
+                    const size_t w_idx = h * head_dim * emb_dim + d * emb_dim + e;
+
+                    q.data[head_idx] += x.data[x_idx] * wq.data[w_idx];
+                    k.data[head_idx] += x.data[x_idx] * wk.data[w_idx];
+                    v.data[head_idx] += x.data[x_idx] * wv.data[w_idx];
                 }
             }
         }
     }
 
-    float scale = 1.0f / std::sqrt(static_cast<float>(emb / num_heads));
+    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
     for (size_t h = 0; h < num_heads; ++h) {
-        for (size_t i = 0; i < seq; ++i) {
-            for (size_t j = 0; j < seq; ++j) {
-                for (size_t dki = 0; dki < dk; ++dki) {
-                    qk.data[h * seq * seq + i * seq + j] +=
-                        q.data[h * seq * dk + i * dk + dki] * k.data[h * seq * dk + j * dk + dki];
+        for (size_t i = 0; i < seq_len; ++i) {
+            for (size_t j = 0; j < seq_len; ++j) {
+                const size_t qk_idx = h * seq_len * seq_len + i * seq_len + j;
+                for (size_t d = 0; d < head_dim; ++d) {
+                    const size_t q_idx = h * seq_len * head_dim + i * head_dim + d;
+                    const size_t k_idx = h * seq_len * head_dim + j * head_dim + d;
+                    qk.data[qk_idx] += q.data[q_idx] * k.data[k_idx];
                 }
-                qk.data[h * seq * seq + i * seq + j] *= scale;
+                qk.data[qk_idx] *= scale;
             }
         }
     }
 
-    // Apply softmax to qk along the sequence dimension
     for (size_t h = 0; h < num_heads; ++h) {
-        for (size_t i = 0; i < seq; ++i) {
-            // Calculate the sum of exponentials for normalization
+        for (size_t i = 0; i < seq_len; ++i) {
+            const size_t row_start = h * seq_len * seq_len + i * seq_len;
+
+            float max_val = qk.data[row_start];
+            for (size_t j = 1; j < seq_len; ++j) {
+                max_val = std::max(max_val, qk.data[row_start + j]);
+            }
+
             float exp_sum = 0.0f;
-            for (size_t j = 0; j < seq; ++j) {
-                qk.data[h * seq * seq + i * seq + j] =
-                    std::exp(qk.data[h * seq * seq + i * seq + j]);
-                exp_sum += qk.data[h * seq * seq + i * seq + j];
+            for (size_t j = 0; j < seq_len; ++j) {
+                qk.data[row_start + j] = std::exp(qk.data[row_start + j] - max_val);
+                exp_sum += qk.data[row_start + j];
             }
-            // Normalize each value in qk
-            for (size_t j = 0; j < seq; ++j) {
-                qk.data[h * seq * seq + i * seq + j] /= exp_sum;
+
+            for (size_t j = 0; j < seq_len; ++j) {
+                qk.data[row_start + j] /= exp_sum;
+            }
+        }
+    }
+
+    attn_out = nn::Tensor({seq_len, emb_dim}, seq_len * emb_dim, 0.0f);
+    for (size_t h = 0; h < num_heads; ++h) {
+        for (size_t i = 0; i < seq_len; ++i) {
+            for (size_t d = 0; d < head_dim; ++d) {
+                const size_t out_idx = i * emb_dim + h * head_dim + d;
+
+                for (size_t j = 0; j < seq_len; ++j) {
+                    const size_t attn_idx = h * seq_len * seq_len + i * seq_len + j;
+                    const size_t v_idx = h * seq_len * head_dim + j * head_dim + d;
+                    attn_out.data[out_idx] += qk.data[attn_idx] * v.data[v_idx];
+                }
+            }
+        }
+    }
+
+    nn::Tensor out(x.shape, x.size, 0.0f);
+    for (size_t i = 0; i < seq_len; ++i) {
+        for (size_t e1 = 0; e1 < emb_dim; ++e1) {
+            for (size_t e2 = 0; e2 < emb_dim; ++e2) {
+                out.data[i * emb_dim + e1] +=
+                    attn_out.data[i * emb_dim + e2] * wo.data[e1 * emb_dim + e2];
             }
         }
     }
 
     return out;
+}
+
+nn::Tensor *nn::MultiHeadAttention::backward(nn::Tensor &x, nn::Tensor &out) {
+    const size_t seq_len = x.shape[0];
+    const size_t emb_dim = x.shape[1];
+    const size_t head_dim = emb_dim / num_heads;
+
+    for (size_t i = 0; i < seq_len; ++i) {
+        for (size_t e1 = 0; e1 < emb_dim; ++e1) {
+            for (size_t e2 = 0; e2 < emb_dim; ++e2) {
+                wo.grad[e1 * emb_dim + e2] +=
+                    out.grad[i * emb_dim + e1] * attn_out.data[i * emb_dim + e2];
+                attn_out.grad[i * emb_dim + e2] +=
+                    out.grad[i * emb_dim + e1] * wo.data[e1 * emb_dim + e2];
+            }
+        }
+    }
+
+    for (size_t h = 0; h < num_heads; ++h) {
+        for (size_t i = 0; i < seq_len; ++i) {
+            for (size_t d = 0; d < head_dim; ++d) {
+                const size_t out_idx = i * emb_dim + h * head_dim + d;
+                for (size_t j = 0; j < seq_len; ++j) {
+                    const size_t attn_idx = h * seq_len * seq_len + i * seq_len + j;
+                    const size_t v_idx = h * seq_len * head_dim + j * head_dim + d;
+
+                    qk.grad[attn_idx] += attn_out.grad[out_idx] * v.data[v_idx];
+                    v.grad[v_idx] += attn_out.grad[out_idx] * qk.data[attn_idx];
+                }
+            }
+        }
+    }
+
+    for (size_t h = 0; h < num_heads; ++h) {
+        for (size_t i = 0; i < seq_len; ++i) {
+            const size_t row_start = h * seq_len * seq_len + i * seq_len;
+
+            float sum_grad = 0.0f;
+            for (size_t j = 0; j < seq_len; ++j) {
+                sum_grad += qk.grad[row_start + j] * qk.data[row_start + j];
+            }
+
+            for (size_t j = 0; j < seq_len; ++j) {
+                const size_t idx = row_start + j;
+                qk.grad[idx] = qk.data[idx] * (qk.grad[idx] - sum_grad);
+            }
+        }
+    }
+
+    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+    for (size_t i = 0; i < qk.size; ++i) {
+        qk.grad[i] *= scale;
+    }
+
+    for (size_t h = 0; h < num_heads; ++h) {
+        for (size_t i = 0; i < seq_len; ++i) {
+            for (size_t j = 0; j < seq_len; ++j) {
+                const size_t qk_idx = h * seq_len * seq_len + i * seq_len + j;
+                for (size_t d = 0; d < head_dim; ++d) {
+                    const size_t q_idx = h * seq_len * head_dim + i * head_dim + d;
+                    const size_t k_idx = h * seq_len * head_dim + j * head_dim + d;
+
+                    q.grad[q_idx] += qk.grad[qk_idx] * k.data[k_idx];
+                    k.grad[k_idx] += qk.grad[qk_idx] * q.data[q_idx];
+                }
+            }
+        }
+    }
+
+    // Backward pass through linear projections
+    for (size_t h = 0; h < num_heads; ++h) {
+        for (size_t s = 0; s < seq_len; ++s) {
+            for (size_t d = 0; d < head_dim; ++d) {
+                const size_t head_idx = h * seq_len * head_dim + s * head_dim + d;
+                for (size_t e = 0; e < emb_dim; ++e) {
+                    const size_t x_idx = s * emb_dim + e;
+                    const size_t w_idx = h * head_dim * emb_dim + d * emb_dim + e;
+
+                    x.grad[x_idx] +=
+                        (q.grad[head_idx] * wq.data[w_idx] + k.grad[head_idx] * wk.data[w_idx] +
+                         v.grad[head_idx] * wv.data[w_idx]);
+
+                    wq.grad[w_idx] += q.grad[head_idx] * x.data[x_idx];
+                    wk.grad[w_idx] += k.grad[head_idx] * x.data[x_idx];
+                    wv.grad[w_idx] += v.grad[head_idx] * x.data[x_idx];
+                }
+            }
+        }
+    }
+
+    return &x;
 }
 
 nn::Tensor nn::softmax(nn::Tensor &x, int temp = 1) {
@@ -443,32 +570,4 @@ nn::Tensor nn::softmax(nn::Tensor &x, int temp = 1) {
     }
 
     return out;
-}
-
-nn::Tensor *nn::softmax_backward(nn::Tensor &x, nn::Tensor &out, int temp = 1) {
-    size_t batch = x.shape[0], emb = x.shape[1];
-
-    for (size_t i = 0; i < batch; ++i) {
-        const size_t batchi = emb * i;
-        float max = -std::numeric_limits<float>::infinity();
-        for (size_t j = 0; j < emb; ++j) {
-            max = std::max(max, x.data[batchi + j]);
-        }
-
-        float sum = 0.0f;
-        for (size_t j = 0; j < emb; ++j) {
-            sum += std::exp((x.data[batchi + j] - max) / temp);
-        }
-
-        float dsum = 0.0f;
-        for (size_t j = 0; j < emb; ++j) {
-            dsum += out.grad[batchi + j] * out.data[batchi + j];
-        }
-
-        for (size_t j = 0; j < emb; ++j) {
-            x.grad[batchi + j] += out.data[batchi + j] / temp * (out.grad[batchi + j] * sum - dsum);
-        }
-    }
-
-    return &x;
 }

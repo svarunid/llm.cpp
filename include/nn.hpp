@@ -92,12 +92,13 @@ class MultiHeadAttention : public Module {
   private:
     const size_t num_heads;
     Tensor wq, wk, wv, wo;
-    Tensor q, k, v, qk;
+    Tensor q, k, v, qk, attn_out;
 };
 
-Tensor softmax(Tensor &x, int temp);
-Tensor *softmax_backward(Tensor &x, Tensor &out, int temp);
+class Decoder : public Module {};
 
-Tensor cross_entropy_loss(Tensor &x, Tensor &y);
-Tensor *cross_entropy_loss_backward(Tensor &x, Tensor &y, Tensor &out);
+Tensor softmax(Tensor &x, int temp);
+
+Tensor loss(Tensor &x, Tensor &y);
+Tensor *loss_backward(Tensor &x, Tensor &y, Tensor &out);
 }; // namespace nn
