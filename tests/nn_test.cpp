@@ -89,7 +89,7 @@ TEST_F(LayerNormTest, ForwardAndBackwardPass) {
 // Fixture for FeedForwardNN.
 class FeedForwardNNTest : public testing::Test {
   protected:
-    FeedForwardNNTest() : ffnn(1, 3, 2, 1, init()) {}
+    FeedForwardNNTest() : ffnn(3, 2, 1, init()) {}
 
     nn::FeedForwardNN ffnn;
 };

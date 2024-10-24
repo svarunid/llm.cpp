@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <random>
 #include <stddef.h>
 #include <vector>
 
@@ -14,6 +13,7 @@ struct Tensor {
 
     Tensor(std::vector<size_t> shape, size_t size, const std::function<float()> &gen);
     Tensor(std::vector<size_t> shape, size_t size, float init);
+    Tensor();
 };
 
 struct Module {
@@ -42,7 +42,7 @@ class Embedding : public Module {
     std::vector<Tensor *> _parameters() override;
 
     Tensor operator()(std::vector<int> tokens);
-    void backward(std::vector<int> tokens, Tensor &dout);
+    void backward(std::vector<int> tokens, Tensor &out);
 
   private:
     Tensor emb;
@@ -56,7 +56,7 @@ class LayerNorm : public Module {
     std::vector<Tensor *> _parameters() override;
 
     Tensor operator()(Tensor &x);
-    Tensor *backward(Tensor &x, Tensor &dout);
+    Tensor *backward(Tensor &x, Tensor &out);
 
   private:
     Tensor w, b;
@@ -65,14 +65,14 @@ class LayerNorm : public Module {
 
 class FeedForwardNN : public Module {
   public:
-    FeedForwardNN(size_t num_batch, size_t input_dim, size_t hidden_dim, size_t output_dim,
+    FeedForwardNN(size_t input_dim, size_t hidden_dim, size_t output_dim,
                   const std::function<float()> &gen);
 
     std::vector<Tensor *> parameters() override;
     std::vector<Tensor *> _parameters() override;
 
     Tensor operator()(Tensor &x);
-    Tensor *backward(Tensor &x, Tensor &dout);
+    Tensor *backward(Tensor &x, Tensor &out);
 
   private:
     Tensor w1, v, w2, b2;
@@ -87,16 +87,17 @@ class MultiHeadAttention : public Module {
     std::vector<Tensor *> _parameters() override;
 
     Tensor operator()(Tensor &x);
-    Tensor *backward(Tensor &x, Tensor &dout);
+    Tensor *backward(Tensor &x, Tensor &out);
 
   private:
-    size_t num_heads;
-    Tensor wq, wk, wv;
+    const size_t num_heads;
+    Tensor wq, wk, wv, wo;
+    Tensor q, k, v, qk;
 };
 
-Tensor softmax(Tensor &x);
-Tensor softmax_backward(Tensor &x, Tensor &dout);
+Tensor softmax(Tensor &x, int temp);
+Tensor *softmax_backward(Tensor &x, Tensor &out, int temp);
 
 Tensor cross_entropy_loss(Tensor &x, Tensor &y);
-Tensor cross_entropy_loss_backward(Tensor &x, Tensor &y, Tensor &dout);
+Tensor *cross_entropy_loss_backward(Tensor &x, Tensor &y, Tensor &out);
 }; // namespace nn
