@@ -1,0 +1,49 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+AllowShortIfStatementsOnASingleLine: false
+BreakBeforeBraces: Attach
+ColumnLimit: 100
+
+# Indentation settings
+IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
+IndentGotoLabels: false
+
+# Pointer and reference alignment
+PointerAlignment: Right
+
+# Spaces and formatting
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpaceAfterCStyleCast: true
+SpaceBeforeSquareBrackets: false
+SpacesInContainerLiterals: false
+SpacesInAngles: false
+
+# Function declaration and definition settings
+AlwaysBreakAfterReturnType: None
+DerivePointerAlignment: false
+
+# Wrapping settings
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortFunctionsOnASingleLine: Inline
+BinPackArguments: true
+BinPackParameters: true
+BreakConstructorInitializersBeforeComma: false
+
+# Include sorting
+SortIncludes: true
+IncludeBlocks: Preserve
+
+# Namespace settings
+NamespaceIndentation: None
+
+# Miscellaneous settings
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+ReflowComments: true
+SpacesBeforeTrailingComments: 1
+FixNamespaceComments: true

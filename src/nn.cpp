@@ -548,6 +548,12 @@ nn::Tensor *nn::MultiHeadAttention::backward(nn::Tensor &x, nn::Tensor &out) {
     return &x;
 }
 
+nn::Decoder::Decoder(size_t emb_dim, size_t num_heads, size_t hidden_dim,
+                     const std::function<float()> &gen)
+    : attn(nn::MultiHeadAttention(emb_dim, num_heads, gen)),
+      ffnn(nn::FeedForwardNN(emb_dim, hidden_dim, emb_dim, gen)),
+      attn_ln(nn::LayerNorm(emb_dim, gen)), ffnn_ln(nn::LayerNorm(emb_dim, gen)) {}
+
 nn::Tensor nn::softmax(nn::Tensor &x, int temp = 1) {
     nn::Tensor out(x.shape, x.size, 0.0f);
 

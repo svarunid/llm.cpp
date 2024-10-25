@@ -95,7 +95,19 @@ class MultiHeadAttention : public Module {
     Tensor q, k, v, qk, attn_out;
 };
 
-class Decoder : public Module {};
+class Decoder : public Module {
+  public:
+    Decoder(size_t emb_dim, size_t num_heads, size_t hidden_dim, const std::function<float()> &gen);
+
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
+
+    Tensor operator()(Tensor &x);
+    Tensor *backward(Tensor &x, Tensor &out);
+
+  private:
+    Module attn, ffnn, attn_ln, ffnn_ln;
+};
 
 Tensor softmax(Tensor &x, int temp);
 
