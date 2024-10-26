@@ -377,10 +377,6 @@ nn::Tensor nn::MultiHeadAttention::operator()(nn::Tensor &x) {
         for (size_t s = 0; s < seq_len; ++s) {
             for (size_t d = 0; d < head_dim; ++d) {
                 const size_t head_idx = h * seq_len * head_dim + s * head_dim + d;
-                q.data[head_idx] = 0.0f;
-                k.data[head_idx] = 0.0f;
-                v.data[head_idx] = 0.0f;
-
                 for (size_t e = 0; e < emb_dim; ++e) {
                     const size_t x_idx = s * emb_dim + e;
                     const size_t w_idx = h * head_dim * emb_dim + d * emb_dim + e;
@@ -524,7 +520,6 @@ nn::Tensor *nn::MultiHeadAttention::backward(nn::Tensor &x, nn::Tensor &out) {
         }
     }
 
-    // Backward pass through linear projections
     for (size_t h = 0; h < num_heads; ++h) {
         for (size_t s = 0; s < seq_len; ++s) {
             for (size_t d = 0; d < head_dim; ++d) {
@@ -554,11 +549,43 @@ nn::Decoder::Decoder(size_t emb_dim, size_t num_heads, size_t hidden_dim,
       ffnn(nn::FeedForwardNN(emb_dim, hidden_dim, emb_dim, gen)),
       attn_ln(nn::LayerNorm(emb_dim, gen)), ffnn_ln(nn::LayerNorm(emb_dim, gen)) {}
 
+std::vector<nn::Tensor *> nn::Decoder::parameters() {
+    std::vector<nn::Tensor *> parameters = {};
+
+    std::vector<nn::Tensor *> attn_parameters = attn.parameters();
+    std::vector<nn::Tensor *> ffnn_parameters = ffnn.parameters();
+    std::vector<nn::Tensor *> attn_ln_parameters = attn_ln.parameters();
+    std::vector<nn::Tensor *> ffnn_ln_parameters = ffnn_ln.parameters();
+
+    parameters.insert(parameters.end(), attn_parameters.begin(), attn_parameters.end());
+    parameters.insert(parameters.end(), ffnn_parameters.begin(), ffnn_parameters.end());
+    parameters.insert(parameters.end(), attn_ln_parameters.begin(), attn_ln_parameters.end());
+    parameters.insert(parameters.end(), ffnn_ln_parameters.begin(), ffnn_ln_parameters.end());
+
+    return parameters;
+}
+
+std::vector<nn::Tensor *> nn::Decoder::_parameters() {
+    std::vector<nn::Tensor *> _parameters = {};
+
+    std::vector<nn::Tensor *> attn_parameters = attn._parameters();
+    std::vector<nn::Tensor *> ffnn_parameters = ffnn._parameters();
+    std::vector<nn::Tensor *> attn_ln_parameters = attn_ln._parameters();
+    std::vector<nn::Tensor *> ffnn_ln_parameters = ffnn_ln._parameters();
+
+    _parameters.insert(_parameters.end(), attn_parameters.begin(), attn_parameters.end());
+    _parameters.insert(_parameters.end(), ffnn_parameters.begin(), ffnn_parameters.end());
+    _parameters.insert(_parameters.end(), attn_ln_parameters.begin(), attn_ln_parameters.end());
+    _parameters.insert(_parameters.end(), ffnn_ln_parameters.begin(), ffnn_ln_parameters.end());
+
+    return _parameters;
+}
+
 nn::Tensor nn::softmax(nn::Tensor &x, int temp = 1) {
     nn::Tensor out(x.shape, x.size, 0.0f);
 
-    size_t batch = x.shape[0], emb = x.shape[1];
-    for (size_t i = 0; i < batch; ++i) {
+    size_t seq = x.shape[0], emb = x.shape[1];
+    for (size_t i = 0; i < seq; ++i) {
         float max = -std::numeric_limits<float>::infinity();
         for (size_t j = 0; j < emb; ++j) {
             max = std::max(max, x.data[emb * i + j]);

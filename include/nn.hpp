@@ -109,6 +109,22 @@ class Decoder : public Module {
     Module attn, ffnn, attn_ln, ffnn_ln;
 };
 
+class GPT2 : public Module {
+  public:
+    GPT2(size_t vocab_size, size_t emb_dim, size_t num_heads, size_t hidden_dim,
+         const std::function<float()> &gen);
+
+    std::vector<Tensor *> parameters() override;
+    std::vector<Tensor *> _parameters() override;
+
+    Tensor operator()(Tensor &x);
+    Tensor *backward(Tensor &x, Tensor &out);
+
+  private:
+    Embedding emb;
+    std::vector<Decoder> layers;
+};
+
 Tensor softmax(Tensor &x, int temp);
 
 Tensor loss(Tensor &x, Tensor &y);
