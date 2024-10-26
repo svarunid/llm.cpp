@@ -1,3 +1,4 @@
+# **NOTE: Repository archived. Will be continued soon.**
 # llm.cpp
 Building LLM architectures from scratch using C++ (Inspired by [llm.c](https://github.com/karpathy/llm.c))
 
